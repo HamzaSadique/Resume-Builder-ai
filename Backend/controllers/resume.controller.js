@@ -1,7 +1,7 @@
 import Resume from "../models/Resume.model.js";
-import User from "../models/User.model.js";
+import { User } from "../models/User.model.js";
 import ApiResponse from "../utils/ApiResponse.js";
-import ApiError from "../utils/ApiError.js";
+import { ApiError } from "../utils/ApiError.js";
 import asyncHandler from "../utils/asyncHandler.js";
 
 /**
@@ -21,8 +21,9 @@ export const createResume = asyncHandler(async (req, res) => {
   // 2. Check Free Tier limits (Max 2 resumes)
   const resumeCount = await Resume.countDocuments({ userId });
   const FREE_TIER_LIMIT = 2;
+  const currentPlan = user.plan || user.subscriptionPlan || "free";
 
-  if (user.subscriptionPlan === "free" && resumeCount >= FREE_TIER_LIMIT) {
+  if (currentPlan === "free" && resumeCount >= FREE_TIER_LIMIT) {
     throw new ApiError(
       403,
       `Free tier limit reached (${FREE_TIER_LIMIT} resumes max). Please upgrade to Premium.`
@@ -64,7 +65,9 @@ export const createResume = asyncHandler(async (req, res) => {
     customSections,
   });
 
-  return new ApiResponse(201, "Resume created successfully", newResume).send(res);
+  return new ApiResponse(201, "Resume created successfully", {
+    resume: newResume,
+  }).send(res);
 });
 
 /**
@@ -77,7 +80,10 @@ export const getUserResumes = asyncHandler(async (req, res) => {
     .select("title templateId updatedAt createdAt themeColor")
     .sort({ updatedAt: -1 });
 
-  return new ApiResponse(200, "Resumes fetched successfully", resumes).send(res);
+  return new ApiResponse(200, "Resumes fetched successfully", {
+    count: resumes.length,
+    resumes,
+  }).send(res);
 });
 
 /**
@@ -96,7 +102,9 @@ export const getResumeById = asyncHandler(async (req, res) => {
     throw new ApiError(403, "Unauthorized access to this resume");
   }
 
-  return new ApiResponse(200, "Resume retrieved successfully", resume).send(res);
+  return new ApiResponse(200, "Resume retrieved successfully", {
+    resume,
+  }).send(res);
 });
 
 /**
@@ -121,7 +129,9 @@ export const updateResume = asyncHandler(async (req, res) => {
     { new: true, runValidators: true }
   );
 
-  return new ApiResponse(200, "Resume updated successfully", updatedResume).send(res);
+  return new ApiResponse(200, "Resume updated successfully", {
+    resume: updatedResume,
+  }).send(res);
 });
 
 /**
@@ -134,9 +144,13 @@ export const duplicateResume = asyncHandler(async (req, res) => {
 
   const user = await User.findById(userId);
   const resumeCount = await Resume.countDocuments({ userId });
+  const currentPlan = user?.plan || user?.subscriptionPlan || "free";
 
-  if (user.subscriptionPlan === "free" && resumeCount >= 2) {
-    throw new ApiError(403, "Free tier limit reached. Upgrade to Premium to duplicate resumes.");
+  if (currentPlan === "free" && resumeCount >= 2) {
+    throw new ApiError(
+      403,
+      "Free tier limit reached. Upgrade to Premium to duplicate resumes."
+    );
   }
 
   const existingResume = await Resume.findById(req.params.id);
@@ -158,7 +172,9 @@ export const duplicateResume = asyncHandler(async (req, res) => {
 
   const duplicatedResume = await Resume.create(resumeObject);
 
-  return new ApiResponse(201, "Resume duplicated successfully", duplicatedResume).send(res);
+  return new ApiResponse(201, "Resume duplicated successfully", {
+    resume: duplicatedResume,
+  }).send(res);
 });
 
 /**
@@ -179,5 +195,5 @@ export const deleteResume = asyncHandler(async (req, res) => {
 
   await resume.deleteOne();
 
-  return new ApiResponse(200, "Resume deleted successfully", null).send(res);
+  return new ApiResponse(200, "Resume deleted successfully").send(res);
 });

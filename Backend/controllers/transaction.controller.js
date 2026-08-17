@@ -4,9 +4,9 @@ import {
   createCheckout,
 } from "@lemonsqueezy/lemonsqueezy.js";
 import Transaction from "../models/Transaction.model.js";
-import User from "../models/User.model.js";
+import { User } from "../models/User.model.js";
 import ApiResponse from "../utils/ApiResponse.js";
-import ApiError from "../utils/ApiError.js";
+import { ApiError } from "../utils/ApiError.js";
 import asyncHandler from "../utils/asyncHandler.js";
 
 // Initialize Lemon Squeezy API
@@ -28,12 +28,13 @@ export const createCheckoutSession = asyncHandler(async (req, res) => {
     throw new ApiError(404, "User not found");
   }
 
-  if (user.subscriptionPlan === "premium") {
+  const currentPlan = user.plan || user.subscriptionPlan || "free";
+  if (currentPlan === "premium") {
     throw new ApiError(400, "You are already subscribed to the Premium plan");
   }
 
   const storeId = process.env.LEMON_SQUEEZY_STORE_ID;
-  const variantId = process.env.LEMON_SQUEEZY_VARIANT_ID; // Your variant ID from Lemon Squeezy Dashboard
+  const variantId = process.env.LEMON_SQUEEZY_VARIANT_ID;
 
   if (!storeId || !variantId) {
     throw new ApiError(500, "Lemon Squeezy Store configuration is missing");
@@ -53,7 +54,10 @@ export const createCheckoutSession = asyncHandler(async (req, res) => {
   });
 
   if (checkout.error) {
-    throw new ApiError(500, `Checkout creation failed: ${checkout.error.message}`);
+    throw new ApiError(
+      500,
+      `Checkout creation failed: ${checkout.error.message}`
+    );
   }
 
   const checkoutUrl = checkout.data?.data?.attributes?.url;
@@ -70,11 +74,13 @@ export const createCheckoutSession = asyncHandler(async (req, res) => {
  */
 export const handleLemonSqueezyWebhook = asyncHandler(async (req, res) => {
   const secret = process.env.LEMON_SQUEEZY_WEBHOOK_SECRET;
+  if (!secret) {
+    throw new ApiError(500, "Webhook secret key is not set in environment variables");
+  }
+
   const hmac = crypto.createHmac("sha256", secret);
-  const digest = Buffer.from(
-    hmac.update(req.rawBody || JSON.stringify(req.body)).digest("hex"),
-    "utf8"
-  );
+  const rawBody = req.rawBody || JSON.stringify(req.body);
+  const digest = Buffer.from(hmac.update(rawBody).digest("hex"), "utf8");
   const signature = Buffer.from(req.headers["x-signature"] || "", "utf8");
 
   // Verify HMAC SHA256 Signature
@@ -96,10 +102,10 @@ export const handleLemonSqueezyWebhook = asyncHandler(async (req, res) => {
     userId
   ) {
     const attributes = payload.data?.attributes;
-    const totalAmount = (attributes?.total || 0) / 100; // Format cents to standard amount
+    const totalAmount = (attributes?.total || 0) / 100; // Cents to currency format
     const orderId = payload.data?.id;
 
-    // 1. Record Transaction Record
+    // 1. Record Transaction
     await Transaction.create({
       userId,
       lemonSqueezyOrderId: orderId,
@@ -112,7 +118,8 @@ export const handleLemonSqueezyWebhook = asyncHandler(async (req, res) => {
     // 2. Upgrade User Account
     await User.findByIdAndUpdate(userId, {
       subscriptionPlan: "premium",
-      aiGenerationsUsed: 0, // Reset usage limits upon upgrade
+      plan: "premium",
+      aiGenerationsUsed: 0,
     });
   }
 
@@ -129,11 +136,9 @@ export const getUserTransactions = asyncHandler(async (req, res) => {
     createdAt: -1,
   });
 
-  return new ApiResponse(
-    200,
-    "Payment history retrieved successfully",
-    transactions
-  ).send(res);
+  return new ApiResponse(200, "Payment history retrieved successfully", {
+    transactions,
+  }).send(res);
 });
 
 /**
@@ -142,20 +147,21 @@ export const getUserTransactions = asyncHandler(async (req, res) => {
  * @access  Private / Admin
  */
 export const getAllTransactions = asyncHandler(async (req, res) => {
-  const { page = 1, limit = 10 } = req.query;
+  const page = Math.max(1, parseInt(req.query.page) || 1);
+  const limit = Math.max(1, parseInt(req.query.limit) || 10);
   const skip = (page - 1) * limit;
 
   const transactions = await Transaction.find()
-    .populate("userId", "name email")
+    .populate("userId", "fullName email")
     .sort({ createdAt: -1 })
     .skip(skip)
-    .limit(Number(limit));
+    .limit(limit);
 
   const totalTransactions = await Transaction.countDocuments();
 
   return new ApiResponse(200, "All transactions fetched successfully", {
     total: totalTransactions,
-    page: Number(page),
+    page,
     totalPages: Math.ceil(totalTransactions / limit),
     transactions,
   }).send(res);

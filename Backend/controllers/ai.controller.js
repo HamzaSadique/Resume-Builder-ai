@@ -1,6 +1,6 @@
-import User from "../models/User.model.js";
+import { User } from "../models/User.model.js";
 import ApiResponse from "../utils/ApiResponse.js";
-import ApiError from "../utils/ApiError.js";
+import { ApiError } from "../utils/ApiError.js";
 import asyncHandler from "../utils/asyncHandler.js";
 
 // Helper function to call OpenRouter Chat Completions API
@@ -16,7 +16,7 @@ const callOpenRouter = async (messages) => {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${apiKey}`,
-      "HTTP-Referer": "http://localhost:5000", // Required by OpenRouter for analytics/rankings
+      "HTTP-Referer": process.env.CLIENT_URL || "http://localhost:5000",
       "X-Title": "Resume Builder AI",
       "Content-Type": "application/json",
     },
@@ -28,7 +28,7 @@ const callOpenRouter = async (messages) => {
   });
 
   if (!response.ok) {
-    const errorData = await response.json();
+    const errorData = await response.json().catch(() => ({}));
     throw new ApiError(
       response.status,
       `OpenRouter API Error: ${errorData?.error?.message || response.statusText}`
@@ -40,21 +40,22 @@ const callOpenRouter = async (messages) => {
 };
 
 /**
- * @desc    Generate professional resume summary using OpenRouter
- * @route   POST /api/ai/generate-summary
+ * @desc    Generate professional resume summary options using OpenRouter
+ * @route   POST /api/v1/ai/generate-summary
  * @access  Private
  */
 export const generateSummary = asyncHandler(async (req, res) => {
   const userId = req.user._id;
 
-  // 1. Fetch user to verify subscription & AI usage limits
   const user = await User.findById(userId);
   if (!user) {
     throw new ApiError(404, "User not found");
   }
 
-  // Free tier usage limit check
-  if (user.subscriptionPlan === "free" && user.aiGenerationsUsed >= 5) {
+  const currentPlan = user.plan || user.subscriptionPlan || "free";
+
+  // Free tier usage limit check (Max 5 generations)
+  if (currentPlan === "free" && user.aiGenerationsUsed >= 5) {
     throw new ApiError(
       403,
       "Free tier AI limit reached (5 generations max). Upgrade to Premium for unlimited AI suggestions."
@@ -67,19 +68,20 @@ export const generateSummary = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Job title is required to generate a summary");
   }
 
-  // 2. Prepare OpenRouter Messages
   const messages = [
     {
       role: "system",
-      content: "You are an expert ATS resume writer. Output ONLY a valid JSON array of strings containing 3 distinct professional summary options. Do not include markdown or extra text.",
+      content:
+        "You are an expert ATS resume writer. Output ONLY a valid JSON array of strings containing 3 distinct professional summary options. Do not include markdown or extra text.",
     },
     {
       role: "user",
-      content: `Write 3 concise, impact-driven resume summaries for a ${jobTitle} with ${experienceLevel} level experience and skills in ${keySkills.length > 0 ? keySkills.join(", ") : "general competencies"}.`,
+      content: `Write 3 concise, impact-driven resume summaries for a ${jobTitle} with ${experienceLevel} level experience and skills in ${
+        keySkills.length > 0 ? keySkills.join(", ") : "general competencies"
+      }.`,
     },
   ];
 
-  // 3. Request OpenRouter
   const rawResponse = await callOpenRouter(messages);
 
   let summaries = [];
@@ -90,8 +92,8 @@ export const generateSummary = asyncHandler(async (req, res) => {
     summaries = [rawResponse];
   }
 
-  // 4. Increment usage count for Free tier users
-  if (user.subscriptionPlan === "free") {
+  // Increment usage count for Free tier users
+  if (currentPlan === "free") {
     user.aiGenerationsUsed = (user.aiGenerationsUsed || 0) + 1;
     await user.save();
   }
@@ -99,13 +101,13 @@ export const generateSummary = asyncHandler(async (req, res) => {
   return new ApiResponse(200, "AI summaries generated successfully", {
     summaries,
     remainingGenerations:
-      user.subscriptionPlan === "free" ? 5 - user.aiGenerationsUsed : "unlimited",
+      currentPlan === "free" ? Math.max(0, 5 - user.aiGenerationsUsed) : "unlimited",
   }).send(res);
 });
 
 /**
  * @desc    Enhance experience bullet points using OpenRouter
- * @route   POST /api/ai/enhance-bullet-point
+ * @route   POST /api/v1/ai/enhance-bullet
  * @access  Private
  */
 export const enhanceBulletPoint = asyncHandler(async (req, res) => {
@@ -116,7 +118,9 @@ export const enhanceBulletPoint = asyncHandler(async (req, res) => {
     throw new ApiError(404, "User not found");
   }
 
-  if (user.subscriptionPlan === "free" && user.aiGenerationsUsed >= 5) {
+  const currentPlan = user.plan || user.subscriptionPlan || "free";
+
+  if (currentPlan === "free" && user.aiGenerationsUsed >= 5) {
     throw new ApiError(
       403,
       "Free tier AI limit reached. Upgrade to Premium for unlimited AI usage."
@@ -132,7 +136,8 @@ export const enhanceBulletPoint = asyncHandler(async (req, res) => {
   const messages = [
     {
       role: "system",
-      content: "You are an executive resume writer. Return ONLY the improved bullet point as plain text without quotes or markdown formatting.",
+      content:
+        "You are an executive resume writer. Return ONLY the improved bullet point as plain text without quotes or markdown formatting.",
     },
     {
       role: "user",
@@ -142,19 +147,21 @@ export const enhanceBulletPoint = asyncHandler(async (req, res) => {
 
   const enhancedText = await callOpenRouter(messages);
 
-  if (user.subscriptionPlan === "free") {
+  if (currentPlan === "free") {
     user.aiGenerationsUsed = (user.aiGenerationsUsed || 0) + 1;
     await user.save();
   }
 
   return new ApiResponse(200, "Bullet point enhanced successfully", {
     enhancedText,
+    remainingGenerations:
+      currentPlan === "free" ? Math.max(0, 5 - user.aiGenerationsUsed) : "unlimited",
   }).send(res);
 });
 
 /**
  * @desc    Calculate ATS Resume Match Score against Job Description using OpenRouter
- * @route   POST /api/ai/ats-score
+ * @route   POST /api/v1/ai/ats-score
  * @access  Private
  */
 export const calculateAtsScore = asyncHandler(async (req, res) => {
@@ -167,7 +174,8 @@ export const calculateAtsScore = asyncHandler(async (req, res) => {
   const messages = [
     {
       role: "system",
-      content: "Act as an ATS scanner. Output ONLY a raw JSON object with keys: 'score' (0-100), 'matchedKeywords' (array), 'missingKeywords' (array), and 'recommendations' (array of 3 tips). Do not use markdown backticks.",
+      content:
+        "Act as an ATS scanner. Output ONLY a raw JSON object with keys: 'score' (0-100), 'matchedKeywords' (array), 'missingKeywords' (array), and 'recommendations' (array of 3 tips). Do not use markdown backticks.",
     },
     {
       role: "user",

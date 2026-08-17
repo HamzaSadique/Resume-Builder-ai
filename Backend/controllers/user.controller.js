@@ -1,69 +1,100 @@
 import { User } from "../models/User.model.js";
-import apiResponse from "../utils/ApiResponse.js";
-import ApiError from "../utils/ApiError.js";
+import ApiResponse from "../utils/ApiResponse.js";
+import { ApiError } from "../utils/ApiError.js";
 import asyncHandler from "../utils/asyncHandler.js";
 
-// Get Current User Profile
-export const getUserProfile = async (req, res) => {
-  try {
-    const user = await User.findById(req.user._id);
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
+/**
+ * @desc    Get Current Logged-In User Profile
+ * @route   GET /api/users/profile
+ * @access  Private
+ */
+export const getUserProfile = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user._id);
 
-    res.status(200).json({
-      success: true,
-      user,
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+  if (!user) {
+    throw new ApiError(404, "User not found");
   }
-};
 
-// Update Profile Details (Full Name, Profile Settings)
-export const updateUserProfile = async (req, res) => {
-  try {
-    const { fullName } = req.body;
+  return new ApiResponse(200, "User profile retrieved successfully", { user }).send(res);
+});
 
-    const user = await User.findById(req.user._id);
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
+/**
+ * @desc    Update User Profile Details
+ * @route   PUT /api/users/profile
+ * @access  Private
+ */
+export const updateUserProfile = asyncHandler(async (req, res) => {
+  const { fullName } = req.body;
 
-    if (fullName) user.fullName = fullName;
+  const user = await User.findById(req.user._id);
 
-    const updatedUser = await user.save();
-
-    res.status(200).json({
-      success: true,
-      message: "Profile updated successfully",
-      user: updatedUser,
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+  if (!user) {
+    throw new ApiError(404, "User not found");
   }
-};
 
-// Change Password (Authenticated User)
-export const changeCurrentPassword = async (req, res) => {
-  try {
-    const { oldPassword, newPassword } = req.body;
+  if (fullName) user.fullName = fullName;
 
-    const user = await User.findById(req.user._id).select("+password");
+  const updatedUser = await user.save();
 
-    const isPasswordCorrect = await user.isPasswordCorrect(oldPassword);
-    if (!isPasswordCorrect) {
-      return res.status(400).json({ message: "Incorrect old password" });
-    }
+  return new ApiResponse(200, "Profile updated successfully", {
+    user: updatedUser,
+  }).send(res);
+});
 
-    user.password = newPassword;
-    await user.save();
+/**
+ * @desc    Change Password for Logged-In User
+ * @route   PATCH /api/users/change-password
+ * @access  Private
+ */
+export const changeCurrentPassword = asyncHandler(async (req, res) => {
+  const { oldPassword, newPassword } = req.body;
 
-    res.status(200).json({
-      success: true,
-      message: "Password changed successfully",
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+  if (!oldPassword || !newPassword) {
+    throw new ApiError(400, "Both old password and new password are required");
   }
-};
+
+  const user = await User.findById(req.user._id).select("+password");
+
+  if (!user) {
+    throw new ApiError(404, "User not found");
+  }
+
+  const isPasswordCorrect = await user.isPasswordCorrect(oldPassword);
+  if (!isPasswordCorrect) {
+    throw new ApiError(400, "Incorrect old password");
+  }
+
+  user.password = newPassword;
+  await user.save();
+
+  return new ApiResponse(200, "Password changed successfully").send(res);
+});
+
+/**
+ * @desc    Delete Account
+ * @route   DELETE /api/users/account
+ * @access  Private
+ */
+export const deleteAccount = asyncHandler(async (req, res) => {
+  const user = await User.findByIdAndDelete(req.user._id);
+
+  if (!user) {
+    throw new ApiError(404, "User not found");
+  }
+
+  return new ApiResponse(200, "Account deleted successfully").send(res);
+});
+
+/**
+ * @desc    Get All Users (Admin Only)
+ * @route   GET /api/users/admin/all
+ * @access  Private/Admin
+ */
+export const getAllUsersAdmin = asyncHandler(async (req, res) => {
+  const users = await User.find().select("-password");
+
+  return new ApiResponse(200, "All users retrieved successfully", {
+    count: users.length,
+    users,
+  }).send(res);
+});
