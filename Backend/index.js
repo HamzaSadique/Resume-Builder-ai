@@ -1,11 +1,8 @@
 import dotenv from "dotenv";
-
-// 1. Configure environment variables first
-dotenv.config({ path: "./.env" });
-
-// 2. Import modules AFTER env vars are loaded
 import connectDB from "./config/db.js";
 import { app } from "./app.js";
+
+dotenv.config();
 
 const PORT = process.env.PORT || 8000;
 

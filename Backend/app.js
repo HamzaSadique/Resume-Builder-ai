@@ -1,11 +1,22 @@
 import express from "express";
 import cors from "cors";
+import passport from "passport";
 import cookieParser from "cookie-parser";
+import helmet from "helmet";
+import morgan from "morgan";
+import "./config/passport.js";
 import { errorHandler } from "./middlewares/error.middleware.js";
 // Route Imports
 
 const app = express();
 
+app.use(passport.initialize());
+app.use(helmet());
+
+// Log incoming HTTP requests in development mode
+if (process.env.NODE_ENV !== "production") {
+  app.use(morgan("dev"));
+}
 
 // -------------------------------------------------------------
 // Lemon Squeezy signatures require the exact unparsed raw body buffer

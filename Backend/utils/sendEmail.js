@@ -1,22 +1,34 @@
 import nodemailer from "nodemailer";
+import ApiError from "./ApiError.js";
 
-export const sendEmail = async ({ email, subject, message }) => {
-  const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT) || 587,
-    secure: process.env.SMTP_PORT == 465, // true for 465, false for other ports
+const createTransporter = () => {
+  return nodemailer.createTransport({
+    host: process.env.SMTP_HOST || "smtp.gmail.com",
+    port: parseInt(process.env.SMTP_PORT || "587", 10),
+    secure: false,
     auth: {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS,
     },
   });
+};
 
-  const mailOptions = {
-    from: `Rezi Clone <${process.env.SMTP_FROM}>`,
-    to: email,
-    subject,
-    html: message,
-  };
+export const sendEmail = async ({ email, subject, message, html }) => {
+  try {
+    const transporter = createTransporter();
 
-  await transporter.sendMail(mailOptions);
+    const mailOptions = {
+      from: `"${process.env.EMAIL_FROM_NAME || "Resume Builder"}" <${process.env.SMTP_USER}>`,
+      to: email,
+      subject,
+      text: message,
+      html: html || `<p>${message.replace(/\n/g, "<br>")}</p>`,
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    return info;
+  } catch (error) {
+    console.error("Nodemailer Service Error:", error);
+    throw new ApiError(500, "Email delivery failed. Please try again later.");
+  }
 };

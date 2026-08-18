@@ -1,5 +1,5 @@
 import jwt from "jsonwebtoken";
-import User from "../models/User.model.js";
+import { User } from "../models/User.model.js";
 import ApiError from "../utils/ApiError.js";
 import asyncHandler from "../utils/asyncHandler.js";
 
@@ -29,7 +29,7 @@ export const protect = asyncHandler(async (req, res, next) => {
 
     // 3. Attach User to Request (exclude sensitive fields)
     const user = await User.findById(decoded.id || decoded._id).select(
-      "-password"
+      "-password -refreshToken"
     );
 
     if (!user) {
@@ -39,6 +39,9 @@ export const protect = asyncHandler(async (req, res, next) => {
     req.user = user;
     next();
   } catch (error) {
+    if (error.name === "TokenExpiredError") {
+      throw new ApiError(401, "Access token expired. Please refresh your token or log in again.");
+    }
     throw new ApiError(401, "Not authorized, token invalid or expired");
   }
 });

@@ -19,8 +19,18 @@ const userSchema = new mongoose.Schema(
     },
     password: {
       type: String,
-      required: [true, "Password is required"],
-      select: false, // Prevents password leak in query projections
+      required: function () {
+        return !this.googleId; // Password required ONLY if user is not signing in with Google
+      },
+      select: false,
+    },
+    googleId: {
+      type: String,
+      default: null,
+    },
+    avatar: {
+      type: String,
+      default: "",
     },
     role: {
       type: String,
@@ -57,7 +67,7 @@ const userSchema = new mongoose.Schema(
       select: false,
     },
 
-    // Monetization, Free Tier & Access Limits
+    // Monetization & Limits
     plan: {
       type: String,
       enum: ["free", "pro", "lifetime"],
@@ -65,19 +75,19 @@ const userSchema = new mongoose.Schema(
     },
     atsScansRemaining: {
       type: Number,
-      default: 3, // 3 Free ATS Scans limit
+      default: 3,
     },
     freeExportUsed: {
       type: Boolean,
-      default: false, // 1 Free Ready Resume Download
+      default: false,
     },
     aiCredits: {
       type: Number,
-      default: 10, // Initial free AI rewriter tokens
+      default: 10,
     },
     purchasedTemplates: [
       {
-        type: String, // Unlocked premium template IDs
+        type: String,
       },
     ],
   },
@@ -86,36 +96,34 @@ const userSchema = new mongoose.Schema(
 
 // Hash password before saving
 userSchema.pre("save", async function (next) {
-  if (!this.isModified("password")) return next();
+  if (!this.isModified("password") || !this.password) return next();
   this.password = await bcrypt.hash(this.password, 12);
   next();
 });
 
 // Compare input password with hashed password
 userSchema.methods.isPasswordCorrect = async function (enteredPassword) {
+  if (!this.password) return false;
   return await bcrypt.compare(enteredPassword, this.password);
 };
 
 // Generate 6-digit Email OTP and hash it
 userSchema.methods.generateEmailOTP = function () {
-  const otp = Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit code
-  
-  // Store hashed OTP in database for security
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
   this.emailOtp = crypto.createHash("sha256").update(otp).digest("hex");
-  this.emailOtpExpires = Date.now() + 10 * 60 * 1000; // Expires in 10 minutes
-
-  return otp; // Return unhashed OTP to send via email
+  this.emailOtpExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
+  return otp;
 };
 
 // Generate Password Reset Token and hash it
 userSchema.methods.generatePasswordResetToken = function () {
   const resetToken = crypto.randomBytes(32).toString("hex");
-
-  // Store hashed token in database
-  this.passwordResetToken = crypto.createHash("sha256").update(resetToken).digest("hex");
-  this.passwordResetExpires = Date.now() + 15 * 60 * 1000; // Expires in 15 minutes
-
-  return resetToken; // Return unhashed token to construct reset URL
+  this.passwordResetToken = crypto
+    .createHash("sha256")
+    .update(resetToken)
+    .digest("hex");
+  this.passwordResetExpires = Date.now() + 15 * 60 * 1000; // 15 minutes
+  return resetToken;
 };
 
 export const User = mongoose.model("User", userSchema);

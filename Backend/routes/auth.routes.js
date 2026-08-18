@@ -1,20 +1,23 @@
 import { Router } from "express";
+import passport from "passport";
 import {
   registerUser,
-  loginUser,
   verifyOTP,
   resendOTP,
+  loginUser,
+  logoutUser,
   forgotPassword,
   resetPassword,
-  logoutUser,
+  googleCallbackHandler,
 } from "../controllers/auth.controller.js";
-import { protect } from "../middleware/auth.middleware.js";
+import { protect } from "../middlewares/auth.middleware.js";
 import { validateRequest } from "../middlewares/validate.middleware.js";
 import { strictLimiter } from "../middlewares/rateLimiter.middleware.js";
 import {
   registerSchema,
   loginSchema,
   verifyOtpSchema,
+  resendOtpSchema,
   forgotPasswordSchema,
   resetPasswordSchema,
 } from "../validators/auth.validator.js";
@@ -22,10 +25,9 @@ import {
 const router = Router();
 
 // ==========================================
-// PUBLIC AUTHENTICATION ROUTES
+// PUBLIC AUTH ROUTES (Password & Email)
 // ==========================================
 
-// 1. Register User & Send OTP
 router.post(
   "/register",
   strictLimiter,
@@ -33,22 +35,19 @@ router.post(
   registerUser
 );
 
-// 2. Verify Email OTPss
 router.post(
   "/verify-otp",
-  strictLimiter,
   validateRequest(verifyOtpSchema),
   verifyOTP
 );
 
-// 3. Resend Verification OTP
 router.post(
   "/resend-otp",
   strictLimiter,
+  validateRequest(resendOtpSchema),
   resendOTP
 );
 
-// 4. Login User
 router.post(
   "/login",
   strictLimiter,
@@ -56,7 +55,6 @@ router.post(
   loginUser
 );
 
-// 5. Request Password Reset Link
 router.post(
   "/forgot-password",
   strictLimiter,
@@ -64,19 +62,39 @@ router.post(
   forgotPassword
 );
 
-// 6. Reset Password with Token Parameter
 router.post(
   "/reset-password/:token",
-  strictLimiter,
   validateRequest(resetPasswordSchema),
   resetPassword
 );
 
 // ==========================================
-// PROTECTED AUTHENTICATION ROUTES
+// PASSPORT GOOGLE OAUTH ROUTES
 // ==========================================
 
-// 7. Logout User
+// 1. Redirect user to Google OAuth consent screen
+router.get(
+  "/google",
+  passport.authenticate("google", {
+    scope: ["profile", "email"],
+    session: false,
+  })
+);
+
+// 2. Google OAuth Callback Route
+router.get(
+  "/google/callback",
+  passport.authenticate("google", {
+    failureRedirect: `${process.env.CLIENT_URL || "http://localhost:5173"}/login?error=google_failed`,
+    session: false,
+  }),
+  googleCallbackHandler
+);
+
+// ==========================================
+// PROTECTED AUTH ROUTES
+// ==========================================
+
 router.post("/logout", protect, logoutUser);
 
 export default router;

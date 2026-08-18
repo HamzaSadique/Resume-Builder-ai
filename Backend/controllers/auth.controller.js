@@ -1,269 +1,259 @@
 import { User } from "../models/User.model.js";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
-import apiResponse from "../utils/ApiResponse.js";
+import { OAuth2Client } from "google-auth-library";
+import ApiResponse from "../utils/ApiResponse.js";
 import ApiError from "../utils/ApiError.js";
 import asyncHandler from "../utils/asyncHandler.js";
+import { sendEmail } from "../utils/sendEmail.js";
 
-// Helper function to generate JWT Tokens
 const generateTokens = async (userId) => {
-  const accessToken = jwt.sign({ id: userId }, process.env.ACCESS_TOKEN_SECRET, {
-    expiresIn: "1d",
-  });
-  const refreshToken = jwt.sign({ id: userId }, process.env.REFRESH_TOKEN_SECRET, {
-    expiresIn: "7d",
-  });
-
+  const accessToken = jwt.sign(
+    { id: userId },
+    process.env.ACCESS_TOKEN_SECRET,
+    { expiresIn: "1d" }
+  );
+  const refreshToken = jwt.sign(
+    { id: userId },
+    process.env.REFRESH_TOKEN_SECRET,
+    { expiresIn: "7d" }
+  );
   return { accessToken, refreshToken };
 };
 
-// Helper function to send email (Replace with Nodemailer / Resend integration)
-const sendEmail = async ({ email, subject, message }) => {
-  // Integrate your Nodemailer / SendGrid / Resend logic here
-  console.log(`Sending email to ${email}: [${subject}] - ${message}`);
-};
+/**
+ * Handles redirect after successful Google OAuth authentication
+ */
+export const googleCallbackHandler = asyncHandler(async (req, res) => {
+  if (!req.user) {
+    throw new ApiError(401, "Google Authentication failed");
+  }
 
-// 1. Register User
-export const registerUser = async (req, res) => {
-  try {
-    const { fullName, email, password } = req.body;
+  const user = req.user;
+  const { accessToken, refreshToken } = await generateTokens(user._id);
 
-    if (!fullName || !email || !password) {
-      return res.status(400).json({ message: "All fields are required" });
-    }
+  user.refreshToken = refreshToken;
+  await user.save();
 
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(400).json({ message: "User with this email already exists" });
-    }
+  const cookieOptions = {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+  };
 
-    const user = new User({ fullName, email, password });
-    
-    // Generate OTP
-    const otp = user.generateEmailOTP();
-    await user.save();
+  res
+    .cookie("accessToken", accessToken, cookieOptions)
+    .cookie("refreshToken", refreshToken, cookieOptions);
 
-    // Send OTP email
-    await sendEmail({
-      email: user.email,
-      subject: "Verify Your Email - OTP",
-      message: `Your account verification code is: ${otp}. It will expire in 10 minutes.`,
-    });
+  // Redirect client back to frontend dashboard with access token
+  const clientUrl = process.env.CLIENT_URL || "http://localhost:5173";
+  return res.redirect(`${clientUrl}/auth/success?token=${accessToken}`);
+});
 
-    res.status(201).json({
+// 2. Register User (Standard)
+export const registerUser = asyncHandler(async (req, res) => {
+  const { fullName, email, password } = req.body;
+
+  if (!fullName || !email || !password) {
+    throw new ApiError(400, "All fields are required");
+  }
+
+  const existingUser = await User.findOne({ email });
+  if (existingUser) {
+    throw new ApiError(400, "User with this email already exists");
+  }
+
+  const user = new User({ fullName, email, password });
+  const otp = user.generateEmailOTP();
+  await user.save();
+
+  await sendEmail({
+    email: user.email,
+    subject: "Verify Your Email - OTP",
+    message: `Your verification code is: ${otp}. It will expire in 10 minutes.`,
+  });
+
+  return new ApiResponse(
+    201,
+    "Registration successful. Verification OTP sent to email."
+  ).send(res);
+});
+
+// 3. Verify Email OTP
+export const verifyOTP = asyncHandler(async (req, res) => {
+  const { email, otp } = req.body;
+
+  if (!email || !otp) {
+    throw new ApiError(400, "Email and OTP are required");
+  }
+
+  const hashedOtp = crypto.createHash("sha256").update(otp).digest("hex");
+
+  const user = await User.findOne({
+    email,
+    emailOtp: hashedOtp,
+    emailOtpExpires: { $gt: Date.now() },
+  }).select("+emailOtp +emailOtpExpires");
+
+  if (!user) {
+    throw new ApiError(400, "Invalid or expired OTP");
+  }
+
+  user.isVerified = true;
+  user.emailOtp = undefined;
+  user.emailOtpExpires = undefined;
+  await user.save();
+
+  return new ApiResponse(200, "Email verified successfully").send(res);
+});
+
+// 4. Resend OTP
+export const resendOTP = asyncHandler(async (req, res) => {
+  const { email } = req.body;
+
+  const user = await User.findOne({ email });
+  if (!user) {
+    throw new ApiError(404, "User not found");
+  }
+
+  if (user.isVerified) {
+    throw new ApiError(400, "This email is already verified");
+  }
+
+  const otp = user.generateEmailOTP();
+  await user.save();
+
+  await sendEmail({
+    email: user.email,
+    subject: "New Verification OTP",
+    message: `Your new verification code is: ${otp}. Expires in 10 minutes.`,
+  });
+
+  return new ApiResponse(200, "New OTP sent to email").send(res);
+});
+
+// 5. Login User
+export const loginUser = asyncHandler(async (req, res) => {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
+    throw new ApiError(400, "Email and password are required");
+  }
+
+  const user = await User.findOne({ email }).select("+password +refreshToken");
+  if (!user) {
+    throw new ApiError(401, "Invalid credentials");
+  }
+
+  const isPasswordValid = await user.isPasswordCorrect(password);
+  if (!isPasswordValid) {
+    throw new ApiError(401, "Invalid credentials");
+  }
+
+  if (!user.isVerified) {
+    throw new ApiError(
+      403,
+      "Please verify your email address before logging in"
+    );
+  }
+
+  const { accessToken, refreshToken } = await generateTokens(user._id);
+
+  user.refreshToken = refreshToken;
+  await user.save();
+
+  const cookieOptions = {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+  };
+
+  return res
+    .status(200)
+    .cookie("accessToken", accessToken, cookieOptions)
+    .cookie("refreshToken", refreshToken, cookieOptions)
+    .json({
       success: true,
-      message: "Registration successful. Please check your email for the verification OTP.",
+      message: "Login successful",
+      user: {
+        _id: user._id,
+        fullName: user.fullName,
+        email: user.email,
+        role: user.role,
+        plan: user.plan,
+        atsScansRemaining: user.atsScansRemaining,
+        aiCredits: user.aiCredits,
+      },
+      accessToken,
     });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+});
+
+// 6. Logout User
+export const logoutUser = asyncHandler(async (req, res) => {
+  await User.findByIdAndUpdate(req.user._id, { $set: { refreshToken: "" } });
+
+  const cookieOptions = {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+  };
+
+  return res
+    .status(200)
+    .clearCookie("accessToken", cookieOptions)
+    .clearCookie("refreshToken", cookieOptions)
+    .json({ success: true, message: "Logged out successfully" });
+});
+
+// 7. Forgot Password
+export const forgotPassword = asyncHandler(async (req, res) => {
+  const { email } = req.body;
+
+  const user = await User.findOne({ email });
+  if (!user) {
+    throw new ApiError(404, "User with this email does not exist");
   }
-};
 
-// 2. Verify Email OTP
-export const verifyOTP = async (req, res) => {
-  try {
-    const { email, otp } = req.body;
+  const resetToken = user.generatePasswordResetToken();
+  await user.save();
 
-    if (!email || !otp) {
-      return res.status(400).json({ message: "Email and OTP are required" });
-    }
+  const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
 
-    const hashedOtp = crypto.createHash("sha256").update(otp).digest("hex");
+  await sendEmail({
+    email: user.email,
+    subject: "Password Reset Request",
+    message: `Reset your password by clicking this link: ${resetUrl}\n\nLink expires in 15 minutes.`,
+  });
 
-    const user = await User.findOne({
-      email,
-      emailOtp: hashedOtp,
-      emailOtpExpires: { $gt: Date.now() },
-    }).select("+emailOtp +emailOtpExpires");
+  return new ApiResponse(200, "Password reset link sent to email").send(res);
+});
 
-    if (!user) {
-      return res.status(400).json({ message: "Invalid or expired OTP" });
-    }
+// 8. Reset Password
+export const resetPassword = asyncHandler(async (req, res) => {
+  const { token } = req.params;
+  const { password } = req.body;
 
-    user.isVerified = true;
-    user.emailOtp = undefined;
-    user.emailOtpExpires = undefined;
-    await user.save();
-
-    res.status(200).json({
-      success: true,
-      message: "Email verified successfully. You can now log in.",
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+  if (!password) {
+    throw new ApiError(400, "New password is required");
   }
-};
 
-// 3. Resend OTP
-export const resendOTP = async (req, res) => {
-  try {
-    const { email } = req.body;
+  const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
 
-    const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
+  const user = await User.findOne({
+    passwordResetToken: hashedToken,
+    passwordResetExpires: { $gt: Date.now() },
+  });
 
-    if (user.isVerified) {
-      return res.status(400).json({ message: "This email is already verified" });
-    }
-
-    const otp = user.generateEmailOTP();
-    await user.save();
-
-    await sendEmail({
-      email: user.email,
-      subject: "New Verification OTP",
-      message: `Your new verification code is: ${otp}. It expires in 10 minutes.`,
-    });
-
-    res.status(200).json({
-      success: true,
-      message: "A new OTP has been sent to your email address.",
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+  if (!user) {
+    throw new ApiError(400, "Invalid or expired reset token");
   }
-};
 
-// 4. Login User
-export const loginUser = async (req, res) => {
-  try {
-    const { email, password } = req.body;
+  user.password = password;
+  user.passwordResetToken = undefined;
+  user.passwordResetExpires = undefined;
+  await user.save();
 
-    if (!email || !password) {
-      return res.status(400).json({ message: "Email and password are required" });
-    }
-
-    const user = await User.findOne({ email }).select("+password +refreshToken");
-    if (!user) {
-      return res.status(401).json({ message: "Invalid credentials" });
-    }
-
-    const isPasswordValid = await user.isPasswordCorrect(password);
-    if (!isPasswordValid) {
-      return res.status(401).json({ message: "Invalid credentials" });
-    }
-
-    if (!user.isVerified) {
-      return res.status(403).json({ message: "Please verify your email address before logging in" });
-    }
-
-    const { accessToken, refreshToken } = await generateTokens(user._id);
-
-    user.refreshToken = refreshToken;
-    await user.save();
-
-    const options = {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-    };
-
-    res
-      .status(200)
-      .cookie("accessToken", accessToken, options)
-      .cookie("refreshToken", refreshToken, options)
-      .json({
-        success: true,
-        message: "Login successful",
-        user: {
-          _id: user._id,
-          fullName: user.fullName,
-          email: user.email,
-          role: user.role,
-          plan: user.plan,
-          atsScansRemaining: user.atsScansRemaining,
-          aiCredits: user.aiCredits,
-        },
-        accessToken,
-      });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
-
-// 5. Logout User
-export const logoutUser = async (req, res) => {
-  try {
-    await User.findByIdAndUpdate(req.user._id, { $set: { refreshToken: "" } });
-
-    const options = {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-    };
-
-    res
-      .status(200)
-      .clearCookie("accessToken", options)
-      .clearCookie("refreshToken", options)
-      .json({ success: true, message: "Logged out successfully" });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
-
-// 6. Forgot Password
-export const forgotPassword = async (req, res) => {
-  try {
-    const { email } = req.body;
-
-    const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(404).json({ message: "User with this email does not exist" });
-    }
-
-    const resetToken = user.generatePasswordResetToken();
-    await user.save();
-
-    const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
-
-    await sendEmail({
-      email: user.email,
-      subject: "Password Reset Request",
-      message: `You requested a password reset. Click this link to reset your password: ${resetUrl}\n\nThis link expires in 15 minutes.`,
-    });
-
-    res.status(200).json({
-      success: true,
-      message: "Password reset link sent to your email.",
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
-
-// 7. Reset Password
-export const resetPassword = async (req, res) => {
-  try {
-    const { token } = req.params;
-    const { password } = req.body;
-
-    if (!password) {
-      return res.status(400).json({ message: "New password is required" });
-    }
-
-    const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
-
-    const user = await User.findOne({
-      passwordResetToken: hashedToken,
-      passwordResetExpires: { $gt: Date.now() },
-    });
-
-    if (!user) {
-      return res.status(400).json({ message: "Invalid or expired reset token" });
-    }
-
-    user.password = password;
-    user.passwordResetToken = undefined;
-    user.passwordResetExpires = undefined;
-    await user.save();
-
-    res.status(200).json({
-      success: true,
-      message: "Password reset successful. You can now log in with your new password.",
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
+  return new ApiResponse(
+    200,
+    "Password reset successful. You can now log in."
+  ).send(res);
+});
