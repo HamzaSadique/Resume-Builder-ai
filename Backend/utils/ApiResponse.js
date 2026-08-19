@@ -7,4 +7,6 @@ class ApiResponse {
   }
 }
 
+// Support both named and default imports to prevent import errors across files
 export { ApiResponse };
+export default ApiResponse;

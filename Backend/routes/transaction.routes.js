@@ -7,7 +7,7 @@ import {
 } from "../controllers/transaction.controller.js";
 import { protect, authorizeRoles } from "../middlewares/auth.middleware.js";
 import { validateRequest } from "../middlewares/validate.middleware.js";
-import { transactionQuerySchema } from "../validators/transction.validator.js";
+import { transactionQuerySchema } from "../validators/transaction.validator.js";
 
 const router = Router();
 

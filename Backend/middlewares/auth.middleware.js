@@ -1,7 +1,7 @@
 import jwt from "jsonwebtoken";
 import { User } from "../models/User.model.js";
-import ApiError from "../utils/ApiError.js";
-import asyncHandler from "../utils/asyncHandler.js";
+import { ApiError } from "../utils/ApiError.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
 
 /**
  * Protect routes by verifying JWT access token
@@ -37,12 +37,19 @@ export const protect = asyncHandler(async (req, res, next) => {
     }
 
     req.user = user;
-    next();
+    return next();
   } catch (error) {
     if (error.name === "TokenExpiredError") {
-      throw new ApiError(401, "Access token expired. Please refresh your token or log in again.");
+      return next(
+        new ApiError(
+          401,
+          "Access token expired. Please refresh your token or log in again."
+        )
+      );
     }
-    throw new ApiError(401, "Not authorized, token invalid or expired");
+    return next(
+      new ApiError(401, "Not authorized, token invalid or expired")
+    );
   }
 });
 
@@ -52,11 +59,13 @@ export const protect = asyncHandler(async (req, res, next) => {
 export const authorizeRoles = (...roles) => {
   return (req, res, next) => {
     if (!req.user || !roles.includes(req.user.role)) {
-      throw new ApiError(
-        403,
-        `Role (${req.user?.role || "guest"}) is not authorized to access this resource`
+      return next(
+        new ApiError(
+          403,
+          `Role (${req.user?.role || "guest"}) is not authorized to access this resource`
+        )
       );
     }
-    next();
+    return next();
   };
 };

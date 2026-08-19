@@ -1,12 +1,12 @@
 import { User } from "../models/User.model.js";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
-import { OAuth2Client } from "google-auth-library";
 import ApiResponse from "../utils/ApiResponse.js";
 import ApiError from "../utils/ApiError.js";
-import asyncHandler from "../utils/asyncHandler.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
 import { sendEmail } from "../utils/sendEmail.js";
 
+// Helper function to generate tokens
 const generateTokens = async (userId) => {
   const accessToken = jwt.sign(
     { id: userId },
@@ -21,9 +21,7 @@ const generateTokens = async (userId) => {
   return { accessToken, refreshToken };
 };
 
-/**
- * Handles redirect after successful Google OAuth authentication
- */
+// 1. Handles redirect after successful Google OAuth authentication
 export const googleCallbackHandler = asyncHandler(async (req, res) => {
   if (!req.user) {
     throw new ApiError(401, "Google Authentication failed");
@@ -45,7 +43,6 @@ export const googleCallbackHandler = asyncHandler(async (req, res) => {
     .cookie("accessToken", accessToken, cookieOptions)
     .cookie("refreshToken", refreshToken, cookieOptions);
 
-  // Redirect client back to frontend dashboard with access token
   const clientUrl = process.env.CLIENT_URL || "http://localhost:5173";
   return res.redirect(`${clientUrl}/auth/success?token=${accessToken}`);
 });
@@ -73,10 +70,13 @@ export const registerUser = asyncHandler(async (req, res) => {
     message: `Your verification code is: ${otp}. It will expire in 10 minutes.`,
   });
 
-  return new ApiResponse(
-    201,
-    "Registration successful. Verification OTP sent to email."
-  ).send(res);
+  return res.status(201).json(
+    new ApiResponse(
+      201,
+      { email: user.email },
+      "Registration successful. Verification OTP sent to email."
+    )
+  );
 });
 
 // 3. Verify Email OTP
@@ -104,7 +104,9 @@ export const verifyOTP = asyncHandler(async (req, res) => {
   user.emailOtpExpires = undefined;
   await user.save();
 
-  return new ApiResponse(200, "Email verified successfully").send(res);
+  return res
+    .status(200)
+    .json(new ApiResponse(200, {}, "Email verified successfully"));
 });
 
 // 4. Resend OTP
@@ -129,7 +131,9 @@ export const resendOTP = asyncHandler(async (req, res) => {
     message: `Your new verification code is: ${otp}. Expires in 10 minutes.`,
   });
 
-  return new ApiResponse(200, "New OTP sent to email").send(res);
+  return res
+    .status(200)
+    .json(new ApiResponse(200, {}, "New OTP sent to email"));
 });
 
 // 5. Login User
@@ -172,20 +176,24 @@ export const loginUser = asyncHandler(async (req, res) => {
     .status(200)
     .cookie("accessToken", accessToken, cookieOptions)
     .cookie("refreshToken", refreshToken, cookieOptions)
-    .json({
-      success: true,
-      message: "Login successful",
-      user: {
-        _id: user._id,
-        fullName: user.fullName,
-        email: user.email,
-        role: user.role,
-        plan: user.plan,
-        atsScansRemaining: user.atsScansRemaining,
-        aiCredits: user.aiCredits,
-      },
-      accessToken,
-    });
+    .json(
+      new ApiResponse(
+        200,
+        {
+          user: {
+            _id: user._id,
+            fullName: user.fullName,
+            email: user.email,
+            role: user.role,
+            plan: user.plan,
+            atsScansRemaining: user.atsScansRemaining,
+            aiCredits: user.aiCredits,
+          },
+          accessToken,
+        },
+        "Login successful"
+      )
+    );
 });
 
 // 6. Logout User
@@ -201,7 +209,7 @@ export const logoutUser = asyncHandler(async (req, res) => {
     .status(200)
     .clearCookie("accessToken", cookieOptions)
     .clearCookie("refreshToken", cookieOptions)
-    .json({ success: true, message: "Logged out successfully" });
+    .json(new ApiResponse(200, {}, "Logged out successfully"));
 });
 
 // 7. Forgot Password
@@ -224,7 +232,9 @@ export const forgotPassword = asyncHandler(async (req, res) => {
     message: `Reset your password by clicking this link: ${resetUrl}\n\nLink expires in 15 minutes.`,
   });
 
-  return new ApiResponse(200, "Password reset link sent to email").send(res);
+  return res
+    .status(200)
+    .json(new ApiResponse(200, {}, "Password reset link sent to email"));
 });
 
 // 8. Reset Password
@@ -252,8 +262,13 @@ export const resetPassword = asyncHandler(async (req, res) => {
   user.passwordResetExpires = undefined;
   await user.save();
 
-  return new ApiResponse(
-    200,
-    "Password reset successful. You can now log in."
-  ).send(res);
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(
+        200,
+        {},
+        "Password reset successful. You can now log in."
+      )
+    );
 });

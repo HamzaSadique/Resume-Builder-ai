@@ -5,25 +5,32 @@ import cookieParser from "cookie-parser";
 import helmet from "helmet";
 import morgan from "morgan";
 import "./config/passport.js";
+
+// Middleware Imports
 import { errorHandler } from "./middlewares/error.middleware.js";
+import ApiError from "./utils/ApiError.js";
+
 // Route Imports
+import authRouter from "./routes/auth.routes.js";
+import userRouter from "./routes/user.routes.js";
+import documentRouter from "./routes/document.routes.js";
+import newsletterRouter from "./routes/newsletter.routes.js";
+import resumeRouter from "./routes/resume.routes.js";
+import transactionRouter from "./routes/transaction.routes.js";
+import aiRouter from "./routes/ai.routes.js";
 
 const app = express();
 
+// -------------------------------------------------------------
+// 1. Core & Security Middlewares
+// -------------------------------------------------------------
 app.use(passport.initialize());
 app.use(helmet());
 
-// Log incoming HTTP requests in development mode
 if (process.env.NODE_ENV !== "production") {
   app.use(morgan("dev"));
 }
 
-// -------------------------------------------------------------
-// Lemon Squeezy signatures require the exact unparsed raw body buffer
-
-// -------------------------------------------------------------
-// 2. Global Middlewares
-// -------------------------------------------------------------
 app.use(
   cors({
     origin: process.env.CLIENT_URL || "http://localhost:5173",
@@ -31,36 +38,39 @@ app.use(
   })
 );
 
+// Body Parsers
 app.use(express.json({ limit: "16kb" }));
 app.use(express.urlencoded({ extended: true, limit: "16kb" }));
 app.use(cookieParser());
 
 // -------------------------------------------------------------
-// 3. Health Check Route
+// 2. Health Check Route
 // -------------------------------------------------------------
 app.get("/health", (req, res) => {
   res.status(200).json({ status: "OK", timestamp: new Date() });
 });
 
 // -------------------------------------------------------------
-// 4. API Routes Mounting
+// 3. API Routes Mounting
 // -------------------------------------------------------------
-
+app.use("/api/v1/auth", authRouter);
+app.use("/api/v1/users", userRouter);
+app.use("/api/v1/documents", documentRouter);
+app.use("/api/v1/newsletter", newsletterRouter);
+app.use("/api/v1/resume", resumeRouter);
+app.use("/api/v1/transaction", transactionRouter);
+app.use("/api/v1/ai", aiRouter);
 
 // -------------------------------------------------------------
-// 5. Global Error Handling Middleware
+// 4. Catch-All for Unhandled Routes (404)
 // -------------------------------------------------------------
-app.use((err, req, res, next) => {
-  const statusCode = err.statusCode || 500;
-  const message = err.message || "Internal Server Error";
-
-  return res.status(statusCode).json({
-    success: false,
-    statusCode,
-    message,
-    errors: err.errors || [],
-    stack: process.env.NODE_ENV === "development" ? err.stack : undefined,
-  });
+app.use((req, res, next) => {
+  next(new ApiError(404, `Route ${req.originalUrl} not found`));
 });
+
+// -------------------------------------------------------------
+// 5. Global Error Handling Middleware (SINGLE POINT OF EXIT)
+// -------------------------------------------------------------
 app.use(errorHandler);
+
 export { app };
