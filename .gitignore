@@ -41,4 +41,5 @@ yarn-error.log*
 .idea/
 .DS_Store
 Thumbs.db
-
+# Ignore directory tree export file
+tree.txt

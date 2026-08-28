@@ -22,7 +22,7 @@ router.use(protect);
 router.get("/profile", getUserProfile);
 
 router.put(
-  "/profile",
+  "/update-profile",
   validateRequest(updateProfileSchema),
   updateUserProfile
 );

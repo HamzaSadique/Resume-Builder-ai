@@ -18,7 +18,8 @@ import newsletterRouter from "./routes/newsletter.routes.js";
 import resumeRouter from "./routes/resume.routes.js";
 import transactionRouter from "./routes/transaction.routes.js";
 import aiRouter from "./routes/ai.routes.js";
-
+import interviewRouter from "./routes/interview.routes.js";
+import adminRouter from "./routes/admin.routes.js";
 const app = express();
 
 // -------------------------------------------------------------
@@ -60,7 +61,8 @@ app.use("/api/v1/newsletter", newsletterRouter);
 app.use("/api/v1/resume", resumeRouter);
 app.use("/api/v1/transaction", transactionRouter);
 app.use("/api/v1/ai", aiRouter);
-
+app.use("/api/v1/interview", interviewRouter);
+app.use("/api/v1/admin",adminRouter);
 // -------------------------------------------------------------
 // 4. Catch-All for Unhandled Routes (404)
 // -------------------------------------------------------------

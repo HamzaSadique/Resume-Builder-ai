@@ -47,9 +47,9 @@ export const googleCallbackHandler = asyncHandler(async (req, res) => {
   return res.redirect(`${clientUrl}/auth/success?token=${accessToken}`);
 });
 
-// 2. Register User (Standard)
+// 2. Register User (Standard or Admin via secret key)
 export const registerUser = asyncHandler(async (req, res) => {
-  const { fullName, email, password } = req.body;
+  const { fullName, email, password, adminSecretKey } = req.body;
 
   if (!fullName || !email || !password) {
     throw new ApiError(400, "All fields are required");
@@ -60,7 +60,22 @@ export const registerUser = asyncHandler(async (req, res) => {
     throw new ApiError(400, "User with this email already exists");
   }
 
-  const user = new User({ fullName, email, password });
+  // Determine user role based on adminSecretKey
+  let userRole = "user";
+  if (adminSecretKey) {
+    if (adminSecretKey !== process.env.ADMIN_SECRET_KEY) {
+      throw new ApiError(403, "Invalid admin secret key");
+    }
+    userRole = "admin";
+  }
+
+  const user = new User({
+    fullName,
+    email,
+    password,
+    role: userRole,
+  });
+
   const otp = user.generateEmailOTP();
   await user.save();
 
@@ -73,8 +88,8 @@ export const registerUser = asyncHandler(async (req, res) => {
   return res.status(201).json(
     new ApiResponse(
       201,
-      { email: user.email },
-      "Registration successful. Verification OTP sent to email."
+      { email: user.email, role: user.role },
+      `Registration successful as ${user.role}. Verification OTP sent to email.`
     )
   );
 });
@@ -136,6 +151,7 @@ export const resendOTP = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, {}, "New OTP sent to email"));
 });
 
+
 // 5. Login User
 export const loginUser = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
@@ -172,6 +188,23 @@ export const loginUser = asyncHandler(async (req, res) => {
     sameSite: "strict",
   };
 
+  // Base user object returned for all roles
+  const userResponse = {
+    _id: user._id,
+    fullName: user.fullName,
+    email: user.email,
+    role: user.role,
+    avatar: user.avatar,
+  };
+
+  // Attach consumer features ONLY if the user is a standard user
+  if (user.role === "user") {
+    userResponse.plan = user.plan;
+    userResponse.atsScansRemaining = user.atsScansRemaining;
+    userResponse.aiCredits = user.aiCredits;
+    userResponse.freeExportUsed = user.freeExportUsed;
+  }
+
   return res
     .status(200)
     .cookie("accessToken", accessToken, cookieOptions)
@@ -180,15 +213,7 @@ export const loginUser = asyncHandler(async (req, res) => {
       new ApiResponse(
         200,
         {
-          user: {
-            _id: user._id,
-            fullName: user.fullName,
-            email: user.email,
-            role: user.role,
-            plan: user.plan,
-            atsScansRemaining: user.atsScansRemaining,
-            aiCredits: user.aiCredits,
-          },
+          user: userResponse,
           accessToken,
         },
         "Login successful"

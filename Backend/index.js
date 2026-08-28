@@ -1,6 +1,8 @@
 import dotenv from "dotenv";
+import http from "http"; 
 import connectDB from "./config/db.js";
 import { app } from "./app.js";
+import initSocket from "./config/socket.config.js"; 
 
 dotenv.config();
 
@@ -14,7 +16,14 @@ connectDB()
       throw error;
     });
 
-    app.listen(PORT, () => {
+    // 3. CREATE HTTP SERVER WRAPPING EXPRESS APP
+    const server = http.createServer(app);
+
+    // 4. INITIALIZE SOCKET.IO ON THE HTTP SERVER
+    initSocket(server);
+
+    // 5. USE server.listen INSTEAD OF app.listen
+    server.listen(PORT, () => {
       console.log(`Server running on port: ${PORT}`);
     });
   })
