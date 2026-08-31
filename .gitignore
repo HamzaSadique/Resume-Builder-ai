@@ -43,3 +43,23 @@ yarn-error.log*
 Thumbs.db
 # Ignore directory tree export file
 tree.txt
+
+
+# ==========================================
+# FRONTEND / VITE / REACT BUILDS & CACHE
+# ==========================================
+# Production build folder (Vite outputs to 'dist')
+dist/
+dist-ssr/
+build/
+
+# Vite temporary files & cache
+.vite/
+*.local
+
+# Testing / Coverage logs
+coverage/
+*.lcov
+
+# Package Manager lock file overrides (Optional - include if you don't want lock conflicts)
+# package-lock.json
